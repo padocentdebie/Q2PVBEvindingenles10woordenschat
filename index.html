@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NATO Battle: Woordenschat Gecontroleerd</title>
+    <title>NATO Battle: Controlled Start</title>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
         import { getDatabase, ref, set, get, onValue, update, remove } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
@@ -21,7 +21,6 @@
         const app = initializeApp(firebaseConfig);
         const db = getDatabase(app);
 
-        // De lijst is nu 100% gecontroleerd op basis van jouw input
         const woordenlijst = [
             {w: "charisma", c: "uitstraling; persoonlijke aantrekkingskracht", f: ["gierigheid", "saaiheid", "onvriendelijkheid"]},
             {w: "bigamie", c: "het gelijktijdig gehuwd zijn met twee personen", f: ["vrijgezel zijn", "trouwen met familie", "haat tegen vrouwen"]},
@@ -59,21 +58,38 @@
         window.startLes = async function() {
             mijnNaam = document.getElementById('voornaam').value.trim();
             huidigeKlas = document.getElementById('klasSelect').value;
-            if(!mijnNaam || !huidigeKlas) return alert("Vul je naam in en kies je NATO-klas!");
+            if(!mijnNaam || !huidigeKlas) return alert("Identificeer uzelf!");
 
             const usersRef = ref(db, `battle/${huidigeKlas}/users`);
             const snap = await get(usersRef);
             const userCount = snap.size || 0;
-            mijnTeam = (userCount % 2 === 0) ? "Team-Alfa" : "Team-Bravo";
+            const teams = ["Rood", "Blauw", "Groen"];
+            mijnTeam = "Team-" + teams[userCount % 3];
 
             await set(ref(db, `battle/${huidigeKlas}/users/${mijnNaam}`), { team: mijnTeam });
             
             document.getElementById('login-scherm').style.display = 'none';
-            document.getElementById('game-scherm').style.display = 'block';
-            document.getElementById('teamNameDisplay').innerText = "Jij strijdt voor: " + mijnTeam;
+            document.getElementById('game-container').style.display = 'flex';
+            document.getElementById('teamIndicator').innerText = "Jouw Team: " + mijnTeam;
+            document.getElementById('klasDisplay').innerText = "Klas: " + huidigeKlas;
 
-            luisterNaarTeamProgress();
+            luisterNaarGameStatus();
+            luisterNaarKlasDashboard();
         };
+
+        function luisterNaarGameStatus() {
+            // Controleer of de docent het spel heeft gestart
+            onValue(ref(db, `battle/${huidigeKlas}/status`), (snap) => {
+                if(snap.val() === "gestart") {
+                    document.getElementById('wacht-bericht').style.display = 'none';
+                    document.getElementById('vraagAreaContent').style.display = 'block';
+                    luisterNaarTeamProgress();
+                } else {
+                    document.getElementById('wacht-bericht').style.display = 'block';
+                    document.getElementById('vraagAreaContent').style.display = 'none';
+                }
+            });
+        }
 
         function luisterNaarTeamProgress() {
             onValue(ref(db, `battle/${huidigeKlas}/teams/${mijnTeam}`), (snap) => {
@@ -82,107 +98,149 @@
             });
         }
 
+        function luisterNaarKlasDashboard() {
+            onValue(ref(db, `battle/${huidigeKlas}/teams`), (snap) => {
+                const dashboard = document.getElementById('dashboard-list');
+                dashboard.innerHTML = '';
+                const teams = snap.val() || {};
+                ["Team-Rood", "Team-Blauw", "Team-Groen"].forEach(tName => {
+                    const tData = teams[tName] || { index: 0 };
+                    const perc = Math.round((tData.index / woordenlijst.length) * 100);
+                    dashboard.innerHTML += `
+                        <div class="dash-team ${perc === 100 ? 'winner' : ''}">
+                            <div style="display:flex; justify-content:space-between;">
+                                <span>${tName}</span>
+                                <span>${perc}%</span>
+                            </div>
+                            <div class="progress-bg"><div class="progress-fill" style="width:${perc}%"></div></div>
+                        </div>`;
+                });
+            });
+        }
+
         function toonVraag(index, fouten) {
             if(index >= woordenlijst.length) {
-                document.getElementById('vraagArea').innerHTML = "<h1 style='color:#00ff88'>MISSIE VOLBRACHT!</h1><p>Jullie team heeft alle 30 woorden beheerst.</p>";
+                document.getElementById('vraagAreaContent').innerHTML = "<h1 style='color:#0f0'>MISSIE VOLBRACHT</h1>";
                 return;
             }
-            
             const item = woordenlijst[index];
             document.getElementById('woordDisplay').innerText = item.w;
-            document.getElementById('progressDisplay').innerText = `Voortgang: ${index + 1} / ${woordenlijst.length} | Teamfouten: ${fouten}/2`;
-
+            
             const hash = mijnNaam.split('').reduce((a,b) => {a=((a<<5)-a)+b.charCodeAt(0);return a&a},0);
             const krijgtAntwoord = ((Math.abs(hash) + index) % 2 === 0);
             
             let opties = [...item.f];
-            if(krijgtAntwoord) {
-                opties.push(item.c);
-            } else {
-                opties.push("Ik heb de juiste uitleg NIET (Overleg!)");
-            }
-
-            opties = opties.sort(() => Math.random() - 0.5);
+            opties.push(krijgtAntwoord ? item.c : "IK HEB DE DEFINITIE NIET");
+            opties.sort(() => Math.random() - 0.5);
             
             const btnArea = document.getElementById('buttonArea');
             btnArea.innerHTML = '';
             opties.forEach(optie => {
                 const btn = document.createElement('button');
                 btn.innerText = optie;
-                btn.onclick = () => verwerkGok(optie, item.c, index, fouten);
+                btn.onclick = () => {
+                    if(optie === item.c) update(ref(db, `battle/${huidigeKlas}/teams/${mijnTeam}`), { index: index + 1, fouten: 0 });
+                    else if(optie.includes("NIET")) alert("Kijk bij je buren!");
+                    else verwerkFout(index, fouten, item.c);
+                };
                 btnArea.appendChild(btn);
             });
         }
 
-        async function verwerkGok(gekozen, correct, index, fouten) {
-            const teamRef = ref(db, `battle/${huidigeKlas}/teams/${mijnTeam}`);
-            
-            if(gekozen === correct) {
-                update(teamRef, { index: index + 1, fouten: 0 });
-            } else if (gekozen.includes("NIET")) {
-                alert("Kijk op het scherm van je teamgenoten!");
-            } else {
-                const nieuweFouten = fouten + 1;
-                document.getElementById('feedback').innerText = `FOUT! Correct was: ${correct}`;
-                document.getElementById('buttonArea').style.pointerEvents = "none";
-
-                setTimeout(() => {
-                    document.getElementById('feedback').innerText = "";
-                    document.getElementById('buttonArea').style.pointerEvents = "auto";
-                    if(nieuweFouten >= 2) {
-                        set(teamRef, { index: 0, fouten: 0 });
-                        alert("2x FOUT! Jullie vallen terug naar de start!");
-                    } else {
-                        update(teamRef, { fouten: nieuweFouten });
-                    }
-                }, 3000);
-            }
+        function verwerkFout(index, fouten, correct) {
+            const nieuweFouten = fouten + 1;
+            document.getElementById('feedback').innerText = "FOUT! DEFINITIE ONTHOUDEN.";
+            document.getElementById('buttonArea').style.pointerEvents = "none";
+            setTimeout(() => {
+                document.getElementById('feedback').innerText = "";
+                document.getElementById('buttonArea').style.pointerEvents = "auto";
+                if(nieuweFouten >= 2) set(ref(db, `battle/${huidigeKlas}/teams/${mijnTeam}`), { index: 0, fouten: 0 });
+                else update(ref(db, `battle/${huidigeKlas}/teams/${mijnTeam}`), { fouten: nieuweFouten });
+            }, 3000);
         }
+
+        // DOCENTEN FUNCTIES
+        window.startSpelVandaag = function() {
+            if(huidigeKlas) set(ref(db, `battle/${huidigeKlas}/status`), "gestart");
+        };
+
+        window.resetKlas = function() {
+            if(confirm("Hele klas wissen en spel stoppen?")) {
+                remove(ref(db, `battle/${huidigeKlas}`));
+                location.reload();
+            }
+        };
     </script>
     <style>
-        body { font-family: 'Courier New', Courier, monospace; background: #050505; color: #00ff88; text-align: center; padding: 20px; }
-        .box { background: #111; padding: 40px; border-radius: 5px; max-width: 700px; margin: 50px auto; border: 1px solid #00ff88; box-shadow: 0 0 20px rgba(0,255,136,0.2); }
-        #woordDisplay { font-size: 3.5em; font-weight: bold; margin: 30px 0; text-transform: uppercase; color: #fff; text-shadow: 2px 2px #00ff88; }
-        button { background: #000; color: #00ff88; border: 1px solid #00ff88; padding: 18px; margin: 10px 0; width: 100%; cursor: pointer; font-size: 1.1em; }
-        button:hover { background: #00ff88; color: #000; }
-        #feedback { color: #ff0044; min-height: 25px; margin-top: 15px; font-weight: bold; }
-        .team-badge { border: 1px solid #00ff88; padding: 5px 20px; margin-bottom: 20px; display: inline-block; }
-        #progressDisplay { color: #888; margin-bottom: 10px; }
-        input, select { background: #000; border: 1px solid #00ff88; color: #00ff88; padding: 15px; width: 100%; margin-bottom: 15px; box-sizing: border-box; }
+        body { font-family: 'Consolas', monospace; background: #000; color: #0f0; padding: 20px; }
+        .panel { background: #080808; border: 1px solid #0f0; padding: 30px; border-radius: 4px; box-shadow: 0 0 15px rgba(0,255,0,0.1); }
+        #login-scherm { max-width: 450px; margin: 80px auto; text-align: center; }
+        .instructie-box { background: #111; border: 1px dashed #0f0; padding: 15px; margin-bottom: 20px; font-size: 0.9em; color: #fff; text-align: left; }
+        #game-container { display: none; gap: 20px; max-width: 1100px; margin: auto; }
+        .main-battle { flex: 2; text-align: center; }
+        .dashboard { flex: 1; border-color: #333; }
+        #woordDisplay { font-size: 4em; color: #fff; margin: 20px 0; text-shadow: 0 0 10px #0f0; }
+        button { background: #000; color: #0f0; border: 1px solid #0f0; padding: 18px; width: 100%; cursor: pointer; font-size: 1.1em; }
+        button:hover { background: #0f0; color: #000; }
+        .progress-bg { background: #1a1a1a; height: 12px; margin-top: 8px; }
+        .progress-fill { background: #0f0; height: 100%; transition: 0.8s; width: 0%; }
+        .dash-team { margin-bottom: 20px; }
+        input, select { background: #000; color: #0f0; border: 1px solid #0f0; padding: 12px; width: 100%; margin-bottom: 12px; }
+        #wacht-bericht { padding: 50px; font-style: italic; color: gold; border: 2px solid gold; margin-top: 20px; animation: blink 2s infinite; }
+        @keyframes blink { 0% {opacity: 1;} 50% {opacity: 0.4;} 100% {opacity: 1;} }
+        .docent-controls { margin-top: 50px; border-top: 1px solid #333; padding-top: 20px; }
     </style>
 </head>
 <body>
 
-<div id="login-scherm" class="box">
-    <h1>UNIT WORD-BATTLE v1.0</h1>
-    <p>NATO-KLASSE SEGMENTATIE</p>
-    <input type="text" id="voornaam" placeholder="OPERATOR NAAM">
+<div id="login-scherm" class="panel">
+    <h1>NATO BATTLE v2.2</h1>
+    
+    <div class="instructie-box">
+        <strong>INSTRUCTIE:</strong><br>
+        1. Log in met je voornaam.<br>
+        2. Wacht tot je bent ingedeeld in een team (Rood, Blauw of Groen).<br>
+        3. Wacht tot de docent het spel centraal start.<br>
+        4. Overleg! Slechts één teamlid heeft de juiste uitleg.
+    </div>
+
+    <input type="text" id="voornaam" placeholder="VOORNAAM">
     <select id="klasSelect">
-        <option value="Alfa">ALFA</option><option value="Bravo">BRAVO</option>
-        <option value="Charlie">CHARLIE</option><option value="Delta">DELTA</option>
-        <option value="Echo">ECHO</option><option value="Foxtrot">FOXTROT</option>
-        <option value="Golf">GOLF</option><option value="Hotel">HOTEL</option>
-        <option value="Juliett">JULIETT</option><option value="Kilo">KILO</option>
-        <option value="Lima">LIMA</option><option value="Mike">MIKE</option>
-        <option value="November">NOVEMBER</option><option value="Oscar">OSCAR</option>
-        <option value="Papa">PAPA</option><option value="Quebec">QUEBEC</option>
-        <option value="Romeo">ROMEO</option><option value="Sierra">SIERRA</option>
-        <option value="Tango">TANGO</option><option value="Uniform">UNIFORM</option>
-        <option value="Victor">VICTOR</option><option value="Whiskey">WHISKEY</option>
-        <option value="X-ray">X-RAY</option><option value="Yankee">YANKEE</option>
+        <option value="Alfa">ALFA</option><option value="Bravo">BRAVO</option><option value="Charlie">CHARLIE</option>
+        <option value="Delta">DELTA</option><option value="Echo">ECHO</option><option value="Foxtrot">FOXTROT</option>
+        <option value="Golf">GOLF</option><option value="Hotel">HOTEL</option><option value="Juliett">JULIETT</option>
+        <option value="Kilo">KILO</option><option value="Lima">LIMA</option><option value="Mike">MIKE</option>
+        <option value="November">NOVEMBER</option><option value="Oscar">OSCAR</option><option value="Papa">PAPA</option>
+        <option value="Quebec">QUEBEC</option><option value="Romeo">ROMEO</option><option value="Sierra">SIERRA</option>
+        <option value="Tango">TANGO</option><option value="Uniform">UNIFORM</option><option value="Victor">VICTOR</option>
+        <option value="Whiskey">WHISKEY</option><option value="X-ray">X-RAY</option><option value="Yankee">YANKEE</option>
         <option value="Zulu">ZULU</option>
     </select>
-    <button onclick="startLes()">INITIALISEER VERBINDING</button>
+    <button onclick="startLes()">VERBINDING INITIALISEREN</button>
 </div>
 
-<div id="game-scherm" class="box" style="display:none;">
-    <div id="progressDisplay"></div>
-    <div class="team-badge" id="teamNameDisplay">TEAM</div>
-    <div id="vraagArea">
-        <div id="woordDisplay">---</div>
-        <p>SCAN UW TEAMLEDEN VOOR DE CORRECTE DEFINITIE</p>
-        <div id="buttonArea"></div>
-        <div id="feedback"></div>
+<div id="game-container">
+    <div class="panel main-battle">
+        <div id="klasDisplay" style="font-size:0.8em; border-bottom:1px solid #0f0; margin-bottom:10px;"></div>
+        <div class="team-badge" id="teamIndicator" style="color:gold; font-weight:bold; margin-bottom:20px;">---</div>
+        
+        <div id="wacht-bericht">Wachten op startsein van de docent...</div>
+
+        <div id="vraagAreaContent" style="display:none;">
+            <div id="woordDisplay">---</div>
+            <div id="buttonArea"></div>
+            <div id="feedback" style="color:red; font-weight:bold; margin-top:10px;"></div>
+        </div>
+
+        <div class="docent-controls">
+            <button onclick="startSpelVandaag()" style="background:darkgreen; border:none; margin-bottom:10px;">START SPEL VOOR DEZE KLAS</button>
+            <button onclick="resetKlas()" style="background:#330000; border:none; font-size:0.7em;">Reset Alles</button>
+        </div>
+    </div>
+
+    <div class="panel dashboard">
+        <h3 style="border-bottom:1px solid #0f0;">KLAS PROGRESSIE</h3>
+        <div id="dashboard-list"></div>
     </div>
 </div>
 
