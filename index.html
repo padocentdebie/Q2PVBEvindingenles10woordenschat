@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NATO Battle: Controlled Start</title>
+    <title>NATO Battle: Flashcards & Competition</title>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
         import { getDatabase, ref, set, get, onValue, update, remove } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
@@ -53,7 +53,7 @@
             {w: "fascinatie", c: "betovering; sterke belangstelling", f: ["afkeer", "haat", "verveling"]}
         ];
 
-        let huidigeKlas, mijnNaam, mijnTeam;
+        let huidigeKlas, mijnNaam, mijnTeam, cardIndex = 0;
 
         window.startLes = async function() {
             mijnNaam = document.getElementById('voornaam').value.trim();
@@ -70,22 +70,37 @@
             
             document.getElementById('login-scherm').style.display = 'none';
             document.getElementById('game-container').style.display = 'flex';
-            document.getElementById('teamIndicator').innerText = "Jouw Team: " + mijnTeam;
-            document.getElementById('klasDisplay').innerText = "Klas: " + huidigeKlas;
-
+            document.getElementById('teamIndicator').innerText = "Unit: " + mijnTeam;
+            
+            updateFlashcard();
             luisterNaarGameStatus();
             luisterNaarKlasDashboard();
         };
 
+        function updateFlashcard() {
+            const card = woordenlijst[cardIndex];
+            document.getElementById('card-front').innerText = card.w;
+            document.getElementById('card-back').innerText = card.c;
+            document.getElementById('flashcard').classList.remove('flipped');
+        }
+
+        window.nextCard = function() {
+            cardIndex = (cardIndex + 1) % woordenlijst.length;
+            updateFlashcard();
+        };
+
+        window.flipCard = function() {
+            document.getElementById('flashcard').classList.toggle('flipped');
+        };
+
         function luisterNaarGameStatus() {
-            // Controleer of de docent het spel heeft gestart
             onValue(ref(db, `battle/${huidigeKlas}/status`), (snap) => {
                 if(snap.val() === "gestart") {
-                    document.getElementById('wacht-bericht').style.display = 'none';
+                    document.getElementById('training-zone').style.display = 'none';
                     document.getElementById('vraagAreaContent').style.display = 'block';
                     luisterNaarTeamProgress();
                 } else {
-                    document.getElementById('wacht-bericht').style.display = 'block';
+                    document.getElementById('training-zone').style.display = 'block';
                     document.getElementById('vraagAreaContent').style.display = 'none';
                 }
             });
@@ -106,14 +121,7 @@
                 ["Team-Rood", "Team-Blauw", "Team-Groen"].forEach(tName => {
                     const tData = teams[tName] || { index: 0 };
                     const perc = Math.round((tData.index / woordenlijst.length) * 100);
-                    dashboard.innerHTML += `
-                        <div class="dash-team ${perc === 100 ? 'winner' : ''}">
-                            <div style="display:flex; justify-content:space-between;">
-                                <span>${tName}</span>
-                                <span>${perc}%</span>
-                            </div>
-                            <div class="progress-bg"><div class="progress-fill" style="width:${perc}%"></div></div>
-                        </div>`;
+                    dashboard.innerHTML += `<div class="dash-team"><div style="display:flex; justify-content:space-between;"><span>${tName}</span><span>${perc}%</span></div><div class="progress-bg"><div class="progress-fill" style="width:${perc}%"></div></div></div>`;
                 });
             });
         }
@@ -125,14 +133,11 @@
             }
             const item = woordenlijst[index];
             document.getElementById('woordDisplay').innerText = item.w;
-            
             const hash = mijnNaam.split('').reduce((a,b) => {a=((a<<5)-a)+b.charCodeAt(0);return a&a},0);
             const krijgtAntwoord = ((Math.abs(hash) + index) % 2 === 0);
-            
             let opties = [...item.f];
             opties.push(krijgtAntwoord ? item.c : "IK HEB DE DEFINITIE NIET");
             opties.sort(() => Math.random() - 0.5);
-            
             const btnArea = document.getElementById('buttonArea');
             btnArea.innerHTML = '';
             opties.forEach(optie => {
@@ -140,7 +145,7 @@
                 btn.innerText = optie;
                 btn.onclick = () => {
                     if(optie === item.c) update(ref(db, `battle/${huidigeKlas}/teams/${mijnTeam}`), { index: index + 1, fouten: 0 });
-                    else if(optie.includes("NIET")) alert("Kijk bij je buren!");
+                    else if(optie.includes("NIET")) alert("Overleg met je team!");
                     else verwerkFout(index, fouten, item.c);
                 };
                 btnArea.appendChild(btn);
@@ -149,7 +154,7 @@
 
         function verwerkFout(index, fouten, correct) {
             const nieuweFouten = fouten + 1;
-            document.getElementById('feedback').innerText = "FOUT! DEFINITIE ONTHOUDEN.";
+            document.getElementById('feedback').innerText = "FOUT! CORRECT: " + correct;
             document.getElementById('buttonArea').style.pointerEvents = "none";
             setTimeout(() => {
                 document.getElementById('feedback').innerText = "";
@@ -159,51 +164,37 @@
             }, 3000);
         }
 
-        // DOCENTEN FUNCTIES
-        window.startSpelVandaag = function() {
-            if(huidigeKlas) set(ref(db, `battle/${huidigeKlas}/status`), "gestart");
-        };
-
-        window.resetKlas = function() {
-            if(confirm("Hele klas wissen en spel stoppen?")) {
-                remove(ref(db, `battle/${huidigeKlas}`));
-                location.reload();
-            }
-        };
+        window.startSpelVandaag = () => set(ref(db, `battle/${huidigeKlas}/status`), "gestart");
+        window.resetKlas = () => { if(confirm("Klas resetten?")) { remove(ref(db, `battle/${huidigeKlas}`)); location.reload(); }};
     </script>
     <style>
         body { font-family: 'Consolas', monospace; background: #000; color: #0f0; padding: 20px; }
-        .panel { background: #080808; border: 1px solid #0f0; padding: 30px; border-radius: 4px; box-shadow: 0 0 15px rgba(0,255,0,0.1); }
+        .panel { background: #080808; border: 1px solid #0f0; padding: 30px; border-radius: 4px; }
         #login-scherm { max-width: 450px; margin: 80px auto; text-align: center; }
-        .instructie-box { background: #111; border: 1px dashed #0f0; padding: 15px; margin-bottom: 20px; font-size: 0.9em; color: #fff; text-align: left; }
         #game-container { display: none; gap: 20px; max-width: 1100px; margin: auto; }
         .main-battle { flex: 2; text-align: center; }
         .dashboard { flex: 1; border-color: #333; }
-        #woordDisplay { font-size: 4em; color: #fff; margin: 20px 0; text-shadow: 0 0 10px #0f0; }
-        button { background: #000; color: #0f0; border: 1px solid #0f0; padding: 18px; width: 100%; cursor: pointer; font-size: 1.1em; }
+        
+        /* Flashcard Styles */
+        #training-zone { margin-top: 20px; }
+        .flashcard-container { perspective: 1000px; width: 300px; height: 200px; margin: 20px auto; cursor: pointer; }
+        #flashcard { width: 100%; height: 100%; transition: transform 0.6s; transform-style: preserve-3d; position: relative; }
+        #flashcard.flipped { transform: rotateY(180deg); }
+        .card-side { position: absolute; width: 100%; height: 100%; backface-visibility: hidden; display: flex; align-items: center; justify-content: center; padding: 20px; box-sizing: border-box; border: 2px solid #0f0; background: #111; font-size: 1.2em; text-align: center; }
+        .card-back { transform: rotateY(180deg); color: #fff; border-color: #fff; }
+        
+        button { background: #000; color: #0f0; border: 1px solid #0f0; padding: 15px; width: 100%; cursor: pointer; margin-top: 10px; }
         button:hover { background: #0f0; color: #000; }
-        .progress-bg { background: #1a1a1a; height: 12px; margin-top: 8px; }
+        .progress-bg { background: #1a1a1a; height: 10px; margin: 5px 0 15px 0; }
         .progress-fill { background: #0f0; height: 100%; transition: 0.8s; width: 0%; }
-        .dash-team { margin-bottom: 20px; }
         input, select { background: #000; color: #0f0; border: 1px solid #0f0; padding: 12px; width: 100%; margin-bottom: 12px; }
-        #wacht-bericht { padding: 50px; font-style: italic; color: gold; border: 2px solid gold; margin-top: 20px; animation: blink 2s infinite; }
-        @keyframes blink { 0% {opacity: 1;} 50% {opacity: 0.4;} 100% {opacity: 1;} }
-        .docent-controls { margin-top: 50px; border-top: 1px solid #333; padding-top: 20px; }
     </style>
 </head>
 <body>
 
 <div id="login-scherm" class="panel">
-    <h1>NATO BATTLE v2.2</h1>
-    
-    <div class="instructie-box">
-        <strong>INSTRUCTIE:</strong><br>
-        1. Log in met je voornaam.<br>
-        2. Wacht tot je bent ingedeeld in een team (Rood, Blauw of Groen).<br>
-        3. Wacht tot de docent het spel centraal start.<br>
-        4. Overleg! Slechts één teamlid heeft de juiste uitleg.
-    </div>
-
+    <h1>NATO BATTLE v2.3</h1>
+    <p>VOER JE NAAM IN EN KIES JE KLAS</p>
     <input type="text" id="voornaam" placeholder="VOORNAAM">
     <select id="klasSelect">
         <option value="Alfa">ALFA</option><option value="Bravo">BRAVO</option><option value="Charlie">CHARLIE</option>
@@ -221,25 +212,35 @@
 
 <div id="game-container">
     <div class="panel main-battle">
-        <div id="klasDisplay" style="font-size:0.8em; border-bottom:1px solid #0f0; margin-bottom:10px;"></div>
-        <div class="team-badge" id="teamIndicator" style="color:gold; font-weight:bold; margin-bottom:20px;">---</div>
+        <div id="teamIndicator" style="color:gold; font-weight:bold; margin-bottom:10px;">---</div>
         
-        <div id="wacht-bericht">Wachten op startsein van de docent...</div>
-
-        <div id="vraagAreaContent" style="display:none;">
-            <div id="woordDisplay">---</div>
-            <div id="buttonArea"></div>
-            <div id="feedback" style="color:red; font-weight:bold; margin-top:10px;"></div>
+        <div id="training-zone">
+            <h3>TRAINING MODUS</h3>
+            <p style="font-size:0.8em;">Klik op de kaart om te draaien. Leer de woorden tot de docent start.</p>
+            <div class="flashcard-container" onclick="flipCard()">
+                <div id="flashcard">
+                    <div class="card-side card-front" id="card-front">Woord</div>
+                    <div class="card-side card-back" id="card-back">Betekenis</div>
+                </div>
+            </div>
+            <button onclick="nextCard()" style="width: 50px; border-radius: 50%;">➔</button>
+            <p style="color:gold; margin-top:20px; font-style:italic;">Wachten op startsein docent...</p>
         </div>
 
-        <div class="docent-controls">
-            <button onclick="startSpelVandaag()" style="background:darkgreen; border:none; margin-bottom:10px;">START SPEL VOOR DEZE KLAS</button>
-            <button onclick="resetKlas()" style="background:#330000; border:none; font-size:0.7em;">Reset Alles</button>
+        <div id="vraagAreaContent" style="display:none;">
+            <div id="woordDisplay" style="font-size:3em; margin:20px 0;">---</div>
+            <div id="buttonArea"></div>
+            <div id="feedback" style="color:red; font-weight:bold;"></div>
+        </div>
+
+        <div style="margin-top:50px; border-top:1px solid #222; padding-top:20px;">
+            <button onclick="startSpelVandaag()" style="background:darkgreen; border:none; color:white;">START SPEL</button>
+            <button onclick="resetKlas()" style="background:#200; border:none; font-size:0.7em; margin-top:10px;">Reset Klas</button>
         </div>
     </div>
 
     <div class="panel dashboard">
-        <h3 style="border-bottom:1px solid #0f0;">KLAS PROGRESSIE</h3>
+        <h3 style="border-bottom:1px solid #0f0;">LIVE PROGRESSIE</h3>
         <div id="dashboard-list"></div>
     </div>
 </div>
